@@ -1,0 +1,29 @@
+{
+  "name": "ESP32 LED Matrix Development",
+  "version": "1.0.0",
+  "description": "Build, debug, and develop LED matrix games for ESP32-S3 using PlatformIO, FastLED, and shared libraries. Use when working with ESP32 LED matrices, creating games, troubleshooting hardware issues, or setting up PlatformIO projects.",
+  "triggers": [
+    "ESP32",
+    "LED matrix",
+    "PlatformIO",
+    "FastLED",
+    "MatrixUtil",
+    "BoardConfig",
+    "Waveshare",
+    "ESP32-S3"
+  ],
+  "resources": {
+    "references": [
+      "reference/setup.md",
+      "reference/debugging.md",
+      "reference/development.md"
+    ],
+    "examples": [
+      "examples/minimal-template.md",
+      "examples/snake-game.md",
+      "examples/bouncing-ball.md",
+      "examples/rainbow-effects.md"
+    ]
+  },
+  "entry_point": "SKILL.md"
+}
