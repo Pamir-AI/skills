@@ -9,6 +9,8 @@ description: This skill should be used when users want to expose local web appli
 
 The Distiller platform provides a built-in reverse proxy capability that exposes local web applications to the internet via HTTPS without requiring tunnel services, port forwarding, or proxy configuration. This skill addresses the common issue of absolute paths breaking behind reverse proxies and provides tools to fix these issues automatically.
 
+> ℹ️ You might also see frpc/frps mentioned elsewhere. Those tunnels are optional: the Distiller proxy works entirely on-device. Use the FRP context in this doc only if your deployment already relies on `/etc/frp/frpc.toml` to advertise a hostname such as `test.devices.pamir.ai`.
+
 **Key Pattern:**
 ```
 Local App (port 5000) → Distiller Proxy → Public HTTPS URL
@@ -41,12 +43,14 @@ python -m http.server 8080 # HTTP server on 8080
 https://{subdomain}.devices.pamir.ai/distiller/proxy/{PORT}/
 ```
 
-**🔍 Find your subdomain:** Check frpc config
-```bash
-cat /etc/frp/frpc.toml | grep subdomain
-# Example output: subdomain = "test"
-# Your URL: https://test.devices.pamir.ai/distiller/proxy/5000/
-```
+**Where do I get the subdomain?**
+- If you’re using the Distiller proxy only, the Devices dashboard shows the assigned subdomain.
+- If you’re also tunneling with frpc, you can inspect `/etc/frp/frpc.toml`:
+  ```bash
+  cat /etc/frp/frpc.toml | grep subdomain
+  # Example output: subdomain = "test"
+  # Your URL: https://test.devices.pamir.ai/distiller/proxy/5000/
+  ```
 
 **Step 3: Fix path issues if needed**
 ```bash
@@ -103,6 +107,8 @@ The script fixes:
 - JavaScript: `API_BASE = '/api'` → `API_BASE = 'api'`
 - JavaScript: `fetch('/api/...')` → `fetch('api/...')`
 
+> ⚠️ The fixer is intentionally conservative but still performs in-place edits. Run with `--dry-run` first, keep backups (e.g., via git), and review the diff—projects sometimes rely on intentional absolute URLs.
+
 ### Manual Fix
 
 **HTML Files:**
@@ -134,6 +140,38 @@ fetch('api/data');
 <!-- These are fine (external URLs) -->
 <script src="https://cdn.example.com/library.js"></script>
 ```
+
+## Serving Under a Base Path (e.g., `/watchdog`)
+
+Sometimes you must keep the proxy path segment (such as `/distiller/proxy/5000/watchdog`) instead of stripping the `/`. The pattern below lets your app live under any prefix without code rewrites each time.
+
+1. **Server-side base path variable**
+   ```bash
+   # systemd / shell
+   export BASE_PATH=/watchdog
+   ```
+   ```javascript
+   // Express example
+   const basePath = (process.env.BASE_PATH || '/').replace(/\/$/, '');
+   app.use(`${basePath}/static`, express.static('public'));
+   app.use(basePath, router);
+   app.get(`${basePath}/health`, handler);
+   ```
+
+2. **Inject the base path into rendered HTML**
+   ```html
+   <script>window.BASE_PATH = "{{ basePath }}";</script>
+   <link rel="stylesheet" href="{{ basePath }}/static/dashboard.css">
+   <script src="{{ basePath }}/static/app.js"></script>
+   ```
+
+3. **Teach the front-end to respect it**
+   ```javascript
+   const BASE = window.BASE_PATH || '';
+   await fetch(`${BASE}/api/status`);
+   ```
+
+With those three pieces, requests to `https://subdomain.devices.pamir.ai/distiller/proxy/5000/watchdog/…` stay scoped to `/watchdog` on both server and client, preventing 404s while still allowing the app to run at `/` locally.
 
 ## Framework-Specific Guides
 
@@ -297,11 +335,15 @@ async function startProcess() {
    - ✅ `/api/users`, `/api/data`
    - ❌ `/users` (conflicts with static files)
 
-3. **Test locally first**
+3. **Support a base path**
+   - Use env vars/config to mount your router under `/watchdog` (or similar) when the proxy requires it.
+   - Render `BASE_PATH` into templates and prepend it inside JavaScript fetch calls.
+
+4. **Test locally first**
    - Test on `http://localhost:5000/`
    - Then test through proxy
 
-4. **Document the public URL**
+5. **Document the public URL**
    ```markdown
    Public: https://subdomain.devices.pamir.ai/distiller/proxy/5000/
    Local: http://localhost:5000/
@@ -342,9 +384,9 @@ pkill -f "python app.py"
 
 ### scripts/
 
-**check-paths.sh** - Scans project files for absolute path issues and reports potential problems.
+**check-paths.sh** - Scans project files for absolute path issues and reports potential problems (uses ripgrep when available, falls back to grep). Accepts a project root and reports findings without modifying files.
 
-**fix-paths.sh** - Automatically fixes common absolute path patterns in HTML and JavaScript files.
+**fix-paths.sh** - Automatically fixes common absolute path patterns in HTML and JavaScript files. Supports `--dry-run` to preview changes; always review the diff afterwards if you run it for real.
 
 Usage examples are shown in the "Fixing Path Issues" section above.
 

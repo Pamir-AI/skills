@@ -3,7 +3,7 @@
 
 # check-paths.sh - Scan project for absolute path issues
 
-set -e
+set -euo pipefail
 
 if [ $# -eq 0 ]; then
     echo "Usage: $0 <path-to-project>"
@@ -17,48 +17,51 @@ if [ ! -d "$PROJECT_PATH" ]; then
     exit 1
 fi
 
+USE_RG=false
+if command -v rg >/dev/null 2>&1; then
+    USE_RG=true
+fi
+
+RG_IGNORE=(--glob '!node_modules/**' --glob '!.git/**' --glob '!dist/**' --glob '!build/**')
+GREP_EXCLUDES=(--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build)
+
+run_search() {
+    local description="$1"
+    local pattern="$2"
+    local glob="$3"
+    local extra_filter="$4"
+    local results=""
+
+    if $USE_RG; then
+        results=$(rg --no-heading --line-number "${RG_IGNORE[@]}" --glob "$glob" "$pattern" "$PROJECT_PATH" 2>/dev/null || true)
+    else
+        results=$(grep -R --line-number "${GREP_EXCLUDES[@]}" --include "$glob" "$pattern" "$PROJECT_PATH" 2>/dev/null || true)
+    fi
+
+    if [ -n "$extra_filter" ] && [ -n "$results" ]; then
+        results=$(echo "$results" | grep -i "$extra_filter" || true)
+    fi
+
+    if [ -n "$results" ]; then
+        echo "⚠️  Found ${description}:"
+        echo "$results"
+        echo ""
+        ISSUES_FOUND=$((ISSUES_FOUND + 1))
+    fi
+}
+
 echo "🔍 Checking for absolute path issues in: $PROJECT_PATH"
 echo ""
 
 ISSUES_FOUND=0
 
-# Check HTML files
 echo "📄 Checking HTML files..."
-HTML_ISSUES=$(grep -rn 'href="/' "$PROJECT_PATH" --include="*.html" 2>/dev/null || true)
-HTML_SRC_ISSUES=$(grep -rn 'src="/' "$PROJECT_PATH" --include="*.html" 2>/dev/null || true)
+run_search "absolute href paths" 'href="/' "*.html" ""
+run_search "absolute src paths" 'src="/' "*.html" ""
 
-if [ -n "$HTML_ISSUES" ]; then
-    echo "⚠️  Found absolute href paths:"
-    echo "$HTML_ISSUES"
-    echo ""
-    ISSUES_FOUND=$((ISSUES_FOUND + 1))
-fi
-
-if [ -n "$HTML_SRC_ISSUES" ]; then
-    echo "⚠️  Found absolute src paths:"
-    echo "$HTML_SRC_ISSUES"
-    echo ""
-    ISSUES_FOUND=$((ISSUES_FOUND + 1))
-fi
-
-# Check JavaScript files
 echo "📜 Checking JavaScript files..."
-JS_FETCH_ISSUES=$(grep -rn "fetch('[/]" "$PROJECT_PATH" --include="*.js" 2>/dev/null || true)
-JS_API_ISSUES=$(grep -rn '= ['"'"'"]/' "$PROJECT_PATH" --include="*.js" 2>/dev/null | grep -i api || true)
-
-if [ -n "$JS_FETCH_ISSUES" ]; then
-    echo "⚠️  Found absolute fetch() paths:"
-    echo "$JS_FETCH_ISSUES"
-    echo ""
-    ISSUES_FOUND=$((ISSUES_FOUND + 1))
-fi
-
-if [ -n "$JS_API_ISSUES" ]; then
-    echo "⚠️  Found potential absolute API paths:"
-    echo "$JS_API_ISSUES"
-    echo ""
-    ISSUES_FOUND=$((ISSUES_FOUND + 1))
-fi
+run_search "absolute fetch() paths" "fetch('[/]" "*.js" ""
+run_search "potential API base assignments" '= ['"'"'"]/' "*.js" "api"
 
 echo "────────────────────────────────────────"
 
@@ -68,5 +71,5 @@ else
     echo "⚠️  Found $ISSUES_FOUND potential issue(s)"
     echo ""
     echo "Run fix-paths.sh to automatically fix common patterns:"
-    echo "  $0/../fix-paths.sh $PROJECT_PATH --dry-run"
+    echo "$(dirname "$0")/fix-paths.sh \"$PROJECT_PATH\" --dry-run"
 fi
